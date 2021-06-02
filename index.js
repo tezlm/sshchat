@@ -1,10 +1,10 @@
+const EventEmitter = require('events');
 const readline = require('readline');
 const fs = require('fs');
 const { Server } = require('ssh2');
 const color = code => str => `\x1b[${code}m${str}\x1b[0m`;
 const accent = color("34"), dim = color("90");
 const maxLen = 16;
-const fmtName = name => `[${accent(name)}]`.padEnd(maxLen + 4);
 const conns = new Set();
 const users = new Map();
 
@@ -43,6 +43,7 @@ const server = new Server({
 			ctx.reject();
 		}
 	});
+	
 	client.on('ready', () => {
 		client.on('session', (accept) => {
 			const session = accept();
@@ -88,120 +89,130 @@ function newUser(ctx) {
 // send to all connections
 function broadcast(data) {
 	for(let conn of conns) {
-		conn.stream.write(`\r\x1b[K${data}\r\n`);
-		conn.io.prompt(true);
+		conn.write(data);
+	}
+}
+
+// client class
+class Client extends EventEmitter {
+	constructor(stream, username, admin = false, server = false) {
+		super();
+		this.username = username;
+		this.name = username;
+		this.admin = admin;
+		this.stream = server ? stream.stdout : stream;
+		this.io = readline.createInterface({
+			input: server ? stream.stdin : stream,
+			output: server ? stream.stdout : stream,
+			prompt: "=> ",
+			terminal: true,
+			completer,
+		});
+	}
+
+	init() {
+		this.io.prompt();
+		this.io.on("line", data => {
+			this.stream.write("\x1b[A\x1b[K");
+			this.handle(data.trim());
+			this.io.prompt();
+		});
+	
+		this.io.on("SIGCONT", () => this.emit("meta", `=> ${this.name} is no longer afk`));
+		this.io.on("SIGSTP", () => this.emit("meta", `=> ${this.name} is afk`));
+		this.io.on("SIGINT", () => this.emit("exit"));
+		
+		this.emit("meta", `=== ${this.name} joined! ===`);
+	}
+
+	handle(data) {
+		if(data[0] === "/") {
+			const parts = data.slice(1).split(" ");
+			if(data[1] === "/") {
+				this.emit("message", `${this.formatted} ${data.slice(1)}`);
+			} else if(parts[0] === "help") {
+				this.stream.write(help(this.admin));
+			} else if(parts[0] === "shrug") {
+				this.emit("message", `${this.formatted} ${parts.slice(1).join(" ")} ¯\\_(ツ)_/¯`);
+			} else if(parts[0] === "quit") {
+				this.emit("exit");
+			} else if(parts[0] === "nick") {
+				const old = this.name;
+				const nick = parts.slice(1).join(" ");
+				if(nick.length > maxLen) {
+					return stream.write("name too long\x1b[K\r\n");
+				}
+				this.name = nick ? nick : this.username;
+				this.emit("meta", `=> ${old} changed their name to ${nick}`);
+			} else {
+				this.stream.write(`unknown command ${parts[0]}\r\n`);
+			}
+		} else if(data) {
+			this.emit("message", `${this.formatted} ${data}`);
+		}
+	}
+
+	write(data) {
+		this.stream.write(`\r\x1b[K${data}\r\n`);
+		this.io.prompt(true);
+	}
+
+	get formatted() {
+		return `[${color(this.admin ? 32 : 34)(this.name)}]`.padEnd(maxLen + 4);
 	}
 }
 
 // what to run for a user
 function main(stream, username, client) {
 	if(username === "guest") stream.write("(you're a guest user, btw)\n");
-	let name = username;
-	let formatted = fmtName(name);
-	const io = readline.createInterface({
-		input: stream,
-		output: stream,
-		prompt: "=> ",
-		terminal: true,
-		completer,
-	});
-	io.prompt();
-	io.on("line", data => {
-		data = data.trim();
-		stream.write("\r\x1b[A");
-		if(data[0] === "/") {
-			const parts = data.slice(1).split(" ");
-			if(data[1] === "/") {
-				broadcast(`${formatted} ${data.slice(1)}`);
-			} else if(parts[0] === "help") {
-				return stream.write(help());
-			} else if(parts[0] === "quit") {
-				exit(stream);
-				return;
-			} else if(parts[0] === "nick") {
-				const old = name;
-				const nick = parts.slice(1).join(" ");
-				name = nick ? nick : username;
-				formatted = fmtName(name);
-				broadcast(dim(`=> ${old} changed their name to ${nick}`));
-			} else {
-				stream.write(`unknown command ${parts[0]}\r\n`);
-			}
-			io.prompt();
-			return;
-		}
-		broadcast(`${formatted} ${data}`);
-	});
-
-	io.on("SIGCONT", () => broadcast(dim(`=> ${username} is no longer afk`)));
-	io.on("SIGSTP", () => broadcast(dim(`=> ${username} is afk`)));
-	io.on("SIGINT", () => exit(stream));
-	
-	const user = { stream, io };
-	client.on("close", () => {
-		conns.delete(user);
-		broadcast(dim(`=== ${username} left! ===`));
-	});
+	const user = new Client(stream, username);
+	user.on("message", d => broadcast(d));
+	user.on("meta", d => broadcast(dim(d)));
+	user.on("exit", exit);
+	client.on("close", exit);
 	conns.add(user);
-	broadcast(dim(`=== ${username} joined! ===`));
+	user.init();
+	
+	function exit() {
+		stream.write(`\r\n${dim("goodbye \u{1f44b}")}\r\n`);
+		stream.exit(0);
+		stream.end();
+		conns.delete(user);
+		broadcast(dim(`=== ${username} left! ===`));	
+	}
 }
 
-function exit(stream) {
-	stream.write(`\r\n${accent("goodbye \u{1f44b}")}\r\n`);
-	stream.exit(0);
-	stream.end();
-}
-
-function help() {
-	return [
+function help(admin) {
+	const commands =  [
+		"// - start a message with a `/`",
 		"/help - show this help",
 		"/quit - exit",
 		"/nick <name> - nickname",
-		"// - start a message with a `/`",
-	].join("\r\n") + "\r\n";
+		"/shrug <msg> - add a shrug",
+	];
+	if(admin) commands.push("/kick <username> - kick a user");
+	return commands.join("\r\n") + "\r\n";
 }
 
 function completer(line) {
-	const commands = ["/help", "/quit", "/nick"];
+	const commands = "help quit nick shrug".split(" ").map(i => `/${i} `);
 	if(!line) return [commands, line];
 	const filtered = commands.filter(i => i.startsWith(line));
 	return [filtered, line];
 }
 
-const rl = readline.createInterface({
-	input: process.stdin,
-	output: process.stdout,
-	prompt: "=> ",
-	completer,
+const admin = new Client(process, "server", true, true);
+admin.on("message", d => broadcast(d));
+admin.on("meta", d => broadcast(dim(d)));
+admin.on("exit", () => process.exit(0));
+admin.init();
+conns.add(admin);
+
+process.on("exit", () => {
+	broadcast(dim("=== the server is going down NOW!!! ==="));
+	broadcast(dim("===         have a good day         ==="));
+	for(let i of conns) i.stream.write("\r\x1b[k\n");
 });
 
-const stream = process.stdout;
-let name = color(32)("server");
-rl.prompt();
-rl.on("line", data => {
-	data = data.trim();
-	stream.write("\r\x1b[A");
-	if(data[0] === "/") {
-		const parts = data.slice(1).split(" ");
-		if(data[1] === "/") {
-			broadcast(`${formattedName} ${data.slice(1)}`);
-		} else if(parts[0] === "help") {
-			return stream.write(help());
-		} else if(parts[0] === "quit") {
-			rl.pause();
-		} else if(parts[0] === "nick") {
-			const nick = parts.slice(1).join(" ");
-			name = color(32)(nick || "server");
-			broadcast(dim(`=> server renamed to ${nick || "server"}`));
-		} else {
-			stream.write(`unknown command ${parts[0]}\r\n`);
-		}
-		rl.prompt();
-		return;
-	}
-	broadcast(`[${name}] ${data}`);
-});
-
-rl.on("SIGINT", () => process.exit(0));
-conns.add({ stream, io: rl });
+admin.write(dim("=== welcome ==="));
 server.listen(3000);
