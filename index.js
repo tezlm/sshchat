@@ -2,8 +2,9 @@ const readline = require('readline');
 const fs = require('fs');
 const { Server } = require('ssh2');
 const color = code => str => `\x1b[${code}m${str}\x1b[0m`;
-const accent = color("34"), dim = color("37");
+const accent = color("34"), dim = color("90");
 const maxLen = 16;
+const fmtName = name => `[${accent(name)}]`.padEnd(maxLen + 4);
 const conns = new Set();
 const users = new Map();
 
@@ -95,11 +96,12 @@ function broadcast(data) {
 // what to run for a user
 function main(stream, username, client) {
 	if(username === "guest") stream.write("(you're a guest user, btw)\n");
-	const formattedName = `[${accent(username)}]`.padEnd(maxLen + 4);
+	let name = username;
+	let formatted = fmtName(name);
 	const io = readline.createInterface({
 		input: stream,
 		output: stream,
-		prompt: dim("=> "),
+		prompt: "=> ",
 		terminal: true,
 		completer,
 	});
@@ -110,28 +112,30 @@ function main(stream, username, client) {
 		if(data[0] === "/") {
 			const parts = data.slice(1).split(" ");
 			if(data[1] === "/") {
-				broadcast(`${formattedName} ${data.slice(1)}`);
+				broadcast(`${formatted} ${data.slice(1)}`);
 			} else if(parts[0] === "help") {
 				return stream.write(help());
 			} else if(parts[0] === "quit") {
-				io.pause();
+				exit(stream);
+				return;
+			} else if(parts[0] === "nick") {
+				const old = name;
+				const nick = parts.slice(1).join(" ");
+				name = nick ? nick : username;
+				formatted = fmtName(name);
+				broadcast(dim(`=> ${old} changed their name to ${nick}`));
 			} else {
 				stream.write(`unknown command ${parts[0]}\r\n`);
 			}
 			io.prompt();
 			return;
 		}
-		broadcast(`${formattedName} ${data}`);
+		broadcast(`${formatted} ${data}`);
 	});
 
 	io.on("SIGCONT", () => broadcast(dim(`=> ${username} is no longer afk`)));
 	io.on("SIGSTP", () => broadcast(dim(`=> ${username} is afk`)));
-
-	io.on("pause", () => {
-		stream.write(`\r\n${accent("goodbye \u{1f44b}")}\r\n`);
-		stream.exit(0);
-		stream.end();
-	});
+	io.on("SIGINT", () => exit(stream));
 	
 	const user = { stream, io };
 	client.on("close", () => {
@@ -142,16 +146,23 @@ function main(stream, username, client) {
 	broadcast(dim(`=== ${username} joined! ===`));
 }
 
+function exit(stream) {
+	stream.write(`\r\n${accent("goodbye \u{1f44b}")}\r\n`);
+	stream.exit(0);
+	stream.end();
+}
+
 function help() {
 	return [
 		"/help - show this help",
 		"/quit - exit",
+		"/nick <name> - nickname",
 		"// - start a message with a `/`",
 	].join("\r\n") + "\r\n";
 }
 
 function completer(line) {
-	const commands = ["/help", "/quit"];
+	const commands = ["/help", "/quit", "/nick"];
 	if(!line) return [commands, line];
 	const filtered = commands.filter(i => i.startsWith(line));
 	return [filtered, line];
@@ -160,11 +171,12 @@ function completer(line) {
 const rl = readline.createInterface({
 	input: process.stdin,
 	output: process.stdout,
-	prompt: dim("=> "),
+	prompt: "=> ",
 	completer,
 });
 
 const stream = process.stdout;
+let name = color(32)("server");
 rl.prompt();
 rl.on("line", data => {
 	data = data.trim();
@@ -177,15 +189,19 @@ rl.on("line", data => {
 			return stream.write(help());
 		} else if(parts[0] === "quit") {
 			rl.pause();
+		} else if(parts[0] === "nick") {
+			const nick = parts.slice(1).join(" ");
+			name = color(32)(nick || "server");
+			broadcast(dim(`=> server renamed to ${nick || "server"}`));
 		} else {
 			stream.write(`unknown command ${parts[0]}\r\n`);
 		}
 		rl.prompt();
 		return;
 	}
-	broadcast(`[${color(32)("server")}] ${data}`);
+	broadcast(`[${name}] ${data}`);
 });
 
+rl.on("SIGINT", () => process.exit(0));
 conns.add({ stream, io: rl });
-
 server.listen(3000);
