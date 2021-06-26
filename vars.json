@@ -1,0 +1,8 @@
+{
+	"maxlen": 16,
+	"color": {
+		"system": 90,
+		"user": 34,
+		"admin": 32
+	}
+}

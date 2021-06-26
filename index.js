@@ -1,187 +1,95 @@
-const EventEmitter = require('events');
-const readline = require('readline');
-const fs = require('fs');
-const { Server } = require('ssh2');
-const color = code => str => `\x1b[${code}m${str}\x1b[0m`;
-const accent = color("34"), dim = color("90");
-const maxLen = 16;
+const Server = require('./ssh.js');
+const Client = require('./client.js');
+const vars = require("./vars.json");
+const color = (str, code) => `\x1b[${code}m${str}\x1b[0m`;
+const dim = str => color(str, vars.color.system);
+const valid = /^[a-z0-9_]+$/;
 const conns = new Set();
-const users = new Map();
+const server = new Server();
 
-// load passwords
-if(!fs.existsSync("users")) fs.writeFileSync("users", "");
-const passwds = fs.createWriteStream("users", { flags: "a" });
-for(let user of fs.readFileSync("users", "utf8").split("\n")) {
-	const [name, pass] = user.split(" ");
-	if(!name || !pass) continue;
-	users.set(name, pass);
+function getUser(nick) {
+	for(let i of conns) {
+		if(nick === i.name) return i;
+	}
 }
 
-const server = new Server({
-	hostKeys: [fs.readFileSync("key")],
-	banner: "welcome \u{1f303}",
-	ident: "srv-J1149",
-}, client => {
-	let username = "guest";
-	// auth user
-	client.on('authentication', (ctx) => {
-		username = ctx.username;
-		if(ctx.username.length > maxLen) return ctx.reject();
-		if(ctx.username === "guest") return ctx.accept();
-		if(!users.has(ctx.username)) {
-			if(ctx.method === "keyboard-interactive") {
-				return newUser(ctx);
-			} else {
-				return ctx.reject(["keyboard-interactive"]);
-			}
-		}
-		if (ctx.method === "password" && ctx.password === users.get(ctx.username)) {
-			ctx.accept();
-		} else if(ctx.method === "publickey") {
-			ctx.reject(["password"]);
-		} else {
-			ctx.reject();
-		}
-	});
-	
-	client.on('ready', () => {
-		client.on('session', (accept) => {
-			const session = accept();
-			session.once('pty', (accept) => accept());
-			session.once('shell', (accept) => {
-				main(accept(), username, client);
-			});
-		});
-	});
+// client commands
+Client.command("help", (user) => {
+	user.write(help(user.admin));	
 });
 
-// bad joke
-function cmd(stream) {
-	stream.write("Microsoft Windows [Version 10.0.19042.631]\n");
-	stream.write("(c) 2020 Microsoft Corporation. All rights reserved.\n");
-	stream.write("\n");
-	stream.write("C:\\Users\\zestylemonade> ");
-	stream.on("data", (d) => {
-		d = d.toString().trim();
-		if(!d) {
-			stream.write("C:\\Users\\zestylemonade> ");
-			return;
-		}
-		stream.write("'" + d.match(/[^\s]+/) + "' is not recognized as an internal or external command,\n");
-		stream.write("operable program, or batch file.\n\n");
-		stream.write("C:\\Users\\zestylemonade> ");
-	});
-}
+Client.command("quit", (user) => {
+	user.emit("exit");
+});
 
-// new user
-function newUser(ctx) {
-	ctx.prompt([
-		{ prompt: "think of a password: ", echo: false },
-		{ prompt: "confirm the password: ", echo: false },
-	], "new user!", "to claim this account, please add a password", (a) => {
-		if(a[0] !== a[1]) return ctx.reject(["keyboard-interactive"]);
-		users.set(ctx.username, a[0]);
-		passwds.write(`${ctx.username} ${a[0]}\n`);
-		ctx.accept();
-	});
-}
+Client.command("shrug", (user, args) => {
+	user.emit("message", `${user.formatted} ${args.join(" ")} ¯\\_(ツ)_/¯`);
+});
+
+Client.command("nick", (user, args) => {
+	const old = user.name;
+	const nick = args[0];
+	if(nick.length > vars.maxlen) {
+		return user.write("name too long\x1b[K");
+	}
+	if(!valid.test(nick)) {
+		return user.write("bad name\x1b[K");
+	}
+	if(getUser(nick)) {
+		return user.write("name already taken\x1b[K");
+	}
+	user.name = nick ? nick : user.username;
+	user.emit("meta", `=> ${old} changed their name to ${user.name}`);			
+});
+
+Client.command("kick", (user, args) => {
+	if(!user.admin) return user.write("no perms lol");
+	const toKick = getUser(args[0])
+	if(!toKick) {
+		return user.write("could not find user");
+	}
+	user.emit("meta", `=> kicked ${toKick.name}`);	
+	toKick.write(dim("you have been kicked"));
+	toKick.stream.close();
+});
 
 // send to all connections
 function broadcast(data) {
-	for(let conn of conns) {
-		conn.write(data);
-	}
+	for(let conn of conns) conn.write(data);
 }
 
-// client class
-class Client extends EventEmitter {
-	constructor(stream, username, admin = false, server = false) {
-		super();
-		this.username = username;
-		this.name = username;
-		this.admin = admin;
-		this.stream = server ? stream.stdout : stream;
-		this.io = readline.createInterface({
-			input: server ? stream.stdin : stream,
-			output: server ? stream.stdout : stream,
-			prompt: "=> ",
-			terminal: true,
-			completer,
-		});
-	}
+// handle a new user
+server.on("user", (stream, client, username) => {
+	if(username === "guest") stream.write("(you're a guest user, btw)\r\n");
 
-	init() {
-		this.io.prompt();
-		this.io.on("line", data => {
-			this.stream.write("\x1b[A\x1b[K");
-			this.handle(data.trim());
-			this.io.prompt();
-		});
-	
-		this.io.on("SIGCONT", () => this.emit("meta", `=> ${this.name} is no longer afk`));
-		this.io.on("SIGSTP", () => this.emit("meta", `=> ${this.name} is afk`));
-		this.io.on("SIGINT", () => this.emit("exit"));
-		
-		this.emit("meta", `=== ${this.name} joined! ===`);
-	}
-
-	handle(data) {
-		if(data[0] === "/") {
-			const parts = data.slice(1).split(" ");
-			if(data[1] === "/") {
-				this.emit("message", `${this.formatted} ${data.slice(1)}`);
-			} else if(parts[0] === "help") {
-				this.stream.write(help(this.admin));
-			} else if(parts[0] === "shrug") {
-				this.emit("message", `${this.formatted} ${parts.slice(1).join(" ")} ¯\\_(ツ)_/¯`);
-			} else if(parts[0] === "quit") {
-				this.emit("exit");
-			} else if(parts[0] === "nick") {
-				const old = this.name;
-				const nick = parts.slice(1).join(" ");
-				if(nick.length > maxLen) {
-					return stream.write("name too long\x1b[K\r\n");
-				}
-				this.name = nick ? nick : this.username;
-				this.emit("meta", `=> ${old} changed their name to ${nick}`);
-			} else {
-				this.stream.write(`unknown command ${parts[0]}\r\n`);
-			}
-		} else if(data) {
-			this.emit("message", `${this.formatted} ${data}`);
-		}
-	}
-
-	write(data) {
-		this.stream.write(`\r\x1b[K${data}\r\n`);
-		this.io.prompt(true);
-	}
-
-	get formatted() {
-		return `[${color(this.admin ? 32 : 34)(this.name)}]`.padEnd(maxLen + 4);
-	}
-}
-
-// what to run for a user
-function main(stream, username, client) {
-	if(username === "guest") stream.write("(you're a guest user, btw)\n");
 	const user = new Client(stream, username);
 	user.on("message", d => broadcast(d));
 	user.on("meta", d => broadcast(dim(d)));
-	user.on("exit", exit);
-	client.on("close", exit);
+	user.on("exit", () => exit(user));
+	client.on("close", () => exit(user));
+
+	for(let i of conns) {
+		if(username === i.name && i.name !== i.username) {
+			i.name = i.username;
+			broadcast(dim(`=> reset ${i.name}'s nick because`));
+			break;
+		}
+	}
+
 	conns.add(user);
 	user.init();
-	
-	function exit() {
-		stream.write(`\r\n${dim("goodbye \u{1f44b}")}\r\n`);
-		stream.exit(0);
-		stream.end();
-		conns.delete(user);
-		broadcast(dim(`=== ${username} left! ===`));	
-	}
+});
+
+// close a user connection
+function exit(user) {
+	user.stream.write(`\r\n${dim("goodbye \u{1f44b}")}\r\n`);
+	user.stream.exit(0);
+	user.stream.end();
+	conns.delete(user);
+	broadcast(dim(`=== ${user.name} left! ===`));	
 }
 
+// list commands
 function help(admin) {
 	const commands =  [
 		"// - start a message with a `/`",
@@ -192,13 +100,6 @@ function help(admin) {
 	];
 	if(admin) commands.push("/kick <username> - kick a user");
 	return commands.join("\r\n") + "\r\n";
-}
-
-function completer(line) {
-	const commands = "help quit nick shrug".split(" ").map(i => `/${i} `);
-	if(!line) return [commands, line];
-	const filtered = commands.filter(i => i.startsWith(line));
-	return [filtered, line];
 }
 
 const admin = new Client(process, "server", true, true);
