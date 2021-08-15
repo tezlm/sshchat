@@ -3,7 +3,7 @@ const Client = require('./client.js');
 const vars = require("./vars.json");
 const color = (str, code) => `\x1b[${code}m${str}\x1b[0m`;
 const dim = str => color(str, vars.color.system);
-const valid = /^[a-z0-9_]+$/;
+const valid = /^[a-z0-9_]*$/i;
 const conns = new Set();
 const server = new Server();
 
@@ -28,10 +28,8 @@ Client.command("shrug", (user, args) => {
 
 Client.command("nick", (user, args) => {
 	const old = user.name;
-	const nick = args[0];
-	if(nick.length === 0) {
-		return user.write("name too short\x1b[K");
-	}
+	console.log(args.join(" ").trim());
+	const nick = args.join(" ").trim();
 	if(nick.length > vars.maxlen) {
 		return user.write("name too long\x1b[K");
 	}

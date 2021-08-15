@@ -20,7 +20,7 @@ for(let user of fs.readFileSync("users", "utf8").split("\n")) {
 
 // hashing helper function
 function hash(str) {
-	return crypto.createHash("sha256").update(str).digest();
+	return crypto.createHash("sha256").update(str).digest("hex");
 }
 
 // new user
@@ -31,7 +31,7 @@ function newUser(ctx) {
 	], "new user!", "to claim this account, please add a password", (a) => {
 		if(a[0] !== a[1]) return ctx.reject(["keyboard-interactive"]);
 		users.set(ctx.username, hash(a[0]));
-		passwds.write(`${ctx.username} ${a[0]}\n`);
+		passwds.write(`${ctx.username} ${hash(a[0])}\n`);
 		ctx.accept();
 	});
 }
