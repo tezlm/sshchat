@@ -4,5 +4,9 @@
 		"system": 90,
 		"user": 34,
 		"admin": 32
+	},
+	"server": {
+		"banner": "welcome 🌃",
+		"ident": "srv-J1149"
 	}
 }

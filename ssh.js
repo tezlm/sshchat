@@ -1,12 +1,12 @@
 const EventEmitter = require('events');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Server } = require('ssh2');
 const vars = require("./vars.json");
 const users = new Map();
 const server = {
+	...vars.server,
 	hostKeys: [fs.readFileSync("key")],
-	banner: "welcome \u{1f303}",
-	ident: "srv-J1149",
 };
 
 // load passwords
@@ -18,6 +18,11 @@ for(let user of fs.readFileSync("users", "utf8").split("\n")) {
 	users.set(name, pass);
 }
 
+// hashing helper function
+function hash(str) {
+	return crypto.createHash("sha256").update(str).digest();
+}
+
 // new user
 function newUser(ctx) {
 	ctx.prompt([
@@ -25,7 +30,7 @@ function newUser(ctx) {
 		{ prompt: "confirm the password: ", echo: false },
 	], "new user!", "to claim this account, please add a password", (a) => {
 		if(a[0] !== a[1]) return ctx.reject(["keyboard-interactive"]);
-		users.set(ctx.username, a[0]);
+		users.set(ctx.username, hash(a[0]));
 		passwds.write(`${ctx.username} ${a[0]}\n`);
 		ctx.accept();
 	});
@@ -42,7 +47,7 @@ function auth(ctx) {
 			return ctx.reject(["keyboard-interactive"]);
 		}
 	}
-	if (ctx.method === "password" && ctx.password === users.get(ctx.username)) {
+	if (ctx.method === "password" && hash(ctx.password) === users.get(ctx.username)) {
 		ctx.accept();
 	} else if(ctx.method === "publickey") {
 		ctx.reject(["password"]);

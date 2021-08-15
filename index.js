@@ -29,6 +29,9 @@ Client.command("shrug", (user, args) => {
 Client.command("nick", (user, args) => {
 	const old = user.name;
 	const nick = args[0];
+	if(nick.length === 0) {
+		return user.write("name too short\x1b[K");
+	}
 	if(nick.length > vars.maxlen) {
 		return user.write("name too long\x1b[K");
 	}
@@ -116,4 +119,4 @@ process.on("exit", () => {
 });
 
 admin.write(dim("=== welcome ==="));
-server.listen(3000);
+server.listen(8393);

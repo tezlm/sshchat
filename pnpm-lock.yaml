@@ -1,10 +1,10 @@
 lockfileVersion: 5.3
 
 specifiers:
-  ssh2: ^1.1.0
+  ssh2: ^1.2.0
 
 dependencies:
-  ssh2: 1.1.0
+  ssh2: 1.2.0
 
 packages:
 
@@ -25,12 +25,12 @@ packages:
     engines: {node: '>=8.0.0'}
     requiresBuild: true
     dependencies:
-      nan: 2.14.2
+      nan: 2.15.0
     dev: false
     optional: true
 
-  /nan/2.14.2:
-    resolution: {integrity: sha512-M2ufzIiINKCuDfBSAUr1vWQ+vuVcA9kqx8JJUsbQi6yf1uGRyb7HfpdfUr5qLXf3B/t8dPvcjhKMmlfnP47EzQ==}
+  /nan/2.15.0:
+    resolution: {integrity: sha512-8ZtvEnA2c5aYCZYd1cvgdnU6cqwixRoYg70xPLWUws5ORTa/lnw+u4amixRS/Ac5U5mQVgp9pnlSUnbNWFaWZQ==}
     dev: false
     optional: true
 
@@ -38,8 +38,8 @@ packages:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
     dev: false
 
-  /ssh2/1.1.0:
-    resolution: {integrity: sha512-CidQLG2ZacoT0Z7O6dOyisj4JdrOrLVJ4KbHjVNz9yI1vO08FAYQPcnkXY9BP8zeYo+J/nBgY6Gg4R7w4WFWtg==}
+  /ssh2/1.2.0:
+    resolution: {integrity: sha512-vklfVRyylayGV/zMwVEkTC9kBhA3t264hoUHV/yGuunBJh6uBGP1VlzhOp8EsqxpKnG0xkLE1qHZlU0+t8Vh6Q==}
     engines: {node: '>=10.16.0'}
     requiresBuild: true
     dependencies:
@@ -47,7 +47,7 @@ packages:
       bcrypt-pbkdf: 1.0.2
     optionalDependencies:
       cpu-features: 0.0.2
-      nan: 2.14.2
+      nan: 2.15.0
     dev: false
 
   /tweetnacl/0.14.5:
